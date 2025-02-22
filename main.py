@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk, ImageGrab
+from tkinter import filedialog, messagebox, colorchooser
+from PIL import Image, ImageGrab
 import os
 from datetime import datetime
 import json
@@ -18,7 +18,6 @@ content_frame = None
 def create_widgets():
     global root, text_area, image_label, content_frame
     
-    # Window configuration
     root = ctk.CTk()
     root.title("Notion-like Note Creator")
     root.geometry("800x600")
@@ -35,13 +34,7 @@ def create_widgets():
     file_menu.add_command(label="Save", command=save_note)
     file_menu.add_command(label="Modules", command=show_modules)
 
-    # Toolbar
-    toolbar_frame = ctk.CTkFrame(root)
-    toolbar_frame.pack(fill="x", pady=(0, 5))
-
-    ctk.CTkButton(toolbar_frame, text="Paste Screenshot", command=paste_screenshot).pack(side="left", padx=2)
-
-    # Content area (like Notion's block system)
+    # Content area
     content_frame = ctk.CTkFrame(root)
     content_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
@@ -61,6 +54,8 @@ def create_widgets():
     context_menu.add_command(label="Change Font", command=show_font_menu)
 
     text_area.bind("<Button-3>", lambda event: context_menu.tk_popup(event.x_root, event.y_root))
+    # Bind Ctrl+V to paste screenshot
+    root.bind("<Control-v>", lambda event: paste_screenshot())
 
 def new_note():
     global current_note_id
@@ -110,11 +105,11 @@ def show_modules():
     notes_listbox.title("Modules")
     notes_listbox.geometry("200x400")
     
-    listbox = tk.Listbox(notes_listbox)
+    listbox = tk.Listbox(notes_listbox, bg="#2b2b2b", fg="#ffffff")  # Dark theme for listbox
     listbox.pack(fill="both", expand=True, padx=5, pady=5)
     
     for note_id in notes:
-        if not notes[note_id]["parent"]:  # Show only top-level notes
+        if not notes[note_id]["parent"]:
             listbox.insert(tk.END, note_id)
     
     listbox.bind('<<ListboxSelect>>', load_selected_note)
@@ -132,9 +127,8 @@ def load_selected_note(event):
         
         if note["image_path"]:
             img = Image.open(note["image_path"])
-            photo = ImageTk.PhotoImage(img)
-            image_label.configure(image=photo)
-            image_label.image = photo
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            image_label.configure(image=ctk_img)
         else:
             image_label.configure(image=None)
         update_content_area()
@@ -148,9 +142,8 @@ def paste_screenshot():
             os.makedirs("screenshots", exist_ok=True)
             img.save(save_path)
             
-            photo = ImageTk.PhotoImage(img)
-            image_label.configure(image=photo)
-            image_label.image = photo
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            image_label.configure(image=ctk_img)
             
             notes[current_note_id]["image_path"] = save_path
         else:
@@ -159,12 +152,10 @@ def paste_screenshot():
         messagebox.showerror("Error", f"Failed to paste screenshot: {str(e)}")
 
 def update_content_area():
-    # Clear existing widgets except image_label and text_area
     for widget in content_frame.winfo_children():
         if widget != image_label and widget != text_area:
             widget.destroy()
     
-    # Show breadcrumb navigation for nested notes
     if current_note_id and notes[current_note_id]["parent"]:
         breadcrumb_frame = ctk.CTkFrame(content_frame)
         breadcrumb_frame.pack(fill="x", pady=5)
@@ -190,43 +181,31 @@ def switch_to_note(note_id):
     
     if note["image_path"]:
         img = Image.open(note["image_path"])
-        photo = ImageTk.PhotoImage(img)
-        image_label.configure(image=photo)
-        image_label.image = photo
+        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+        image_label.configure(image=ctk_img)
     else:
         image_label.configure(image=None)
     update_content_area()
 
 def toggle_bold():
-    try:
-        current_tags = text_area.tag_names(tk.SEL_FIRST)
-        if "bold" in current_tags:
-            text_area.tag_remove("bold", tk.SEL_FIRST, tk.SEL_LAST)
-        else:
-            text_area.tag_add("bold", tk.SEL_FIRST, tk.SEL_LAST)
-            text_area.tag_configure("bold", font=("", 12, "bold"))
-    except tk.TclError:
-        pass
+    current_font = text_area.cget("font")
+    if isinstance(current_font, tuple) and len(current_font) >= 2:
+        family = current_font[0]
+        size = current_font[1]
+        weight = current_font[2] if len(current_font) > 2 else "normal"
+    else:
+        family, size, weight = "Arial", 12, "normal"
+    
+    new_weight = "bold" if weight != "bold" else "normal"
+    text_area.configure(font=(family, int(size), new_weight))
 
 def toggle_underline():
-    try:
-        current_tags = text_area.tag_names(tk.SEL_FIRST)
-        if "underline" in current_tags:
-            text_area.tag_remove("underline", tk.SEL_FIRST, tk.SEL_LAST)
-        else:
-            text_area.tag_add("underline", tk.SEL_FIRST, tk.SEL_LAST)
-            text_area.tag_configure("underline", underline=True)
-    except tk.TclError:
-        pass
+    messagebox.showinfo("Info", "Underline not supported in current version")
 
 def choose_color():
-    try:
-        color = ctk.CTkColorPicker(root).get()
-        if color:
-            text_area.tag_add("color", tk.SEL_FIRST, tk.SEL_LAST)
-            text_area.tag_configure("color", foreground=color)
-    except tk.TclError:
-        pass
+    color = colorchooser.askcolor(title="Choose Color")[1]
+    if color:
+        text_area.configure(text_color=color)
 
 def show_font_menu():
     font_menu = ctk.CTkToplevel(root)
@@ -238,15 +217,17 @@ def show_font_menu():
                      command=lambda f=font: [change_font(f), font_menu.destroy()]).pack(pady=5)
 
 def change_font(font):
-    try:
-        text_area.tag_add("font", tk.SEL_FIRST, tk.SEL_LAST)
-        text_area.tag_configure("font", font=(font, 12))
-    except tk.TclError:
-        pass
+    current_font = text_area.cget("font")
+    if isinstance(current_font, tuple) and len(current_font) >= 2:
+        size = current_font[1]
+        weight = current_font[2] if len(current_font) > 2 else "normal"
+    else:
+        size, weight = 12, "normal"
+    text_area.configure(font=(font, int(size), weight))
 
 def main():
-    ctk.set_appearance_mode("System")
-    ctk.set_default_color_theme("blue")
+    ctk.set_appearance_mode("dark")  # Set to dark mode
+    ctk.set_default_color_theme("dark-blue")  # Use a dark theme
     
     create_widgets()
     load_notes()
