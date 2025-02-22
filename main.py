@@ -14,14 +14,15 @@ text_area = None
 image_label = None
 notes_listbox = None
 content_frame = None
+block_widgets = []
 
 def create_widgets():
     global root, text_area, image_label, content_frame
     
     root = ctk.CTk()
     root.title("Notion-like Note Creator")
-    root.geometry("800x600")
-    root.minsize(600, 400)
+    root.geometry("900x700")
+    root.minsize(700, 500)
 
     # Menu bar
     menubar = tk.Menu(root)
@@ -35,45 +36,33 @@ def create_widgets():
     file_menu.add_command(label="Modules", command=show_modules)
 
     # Content area
-    content_frame = ctk.CTkFrame(root)
-    content_frame.pack(fill="both", expand=True, padx=5, pady=5)
+    content_frame = ctk.CTkFrame(root, fg_color="#ffffff")
+    content_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-    # Image display area
-    image_label = ctk.CTkLabel(content_frame, text="")
-    image_label.pack(fill="x", pady=5)
+    # Initial blocks
+    add_text_block()
 
-    # Text area
-    text_area = ctk.CTkTextbox(content_frame)
-    text_area.pack(fill="both", expand=True)
-
-    # Right-click context menu
-    context_menu = tk.Menu(root, tearoff=0)
-    context_menu.add_command(label="Bold", command=toggle_bold)
-    context_menu.add_command(label="Underline", command=toggle_underline)
-    context_menu.add_command(label="Change Color", command=choose_color)
-    context_menu.add_command(label="Change Font", command=show_font_menu)
-
-    text_area.bind("<Button-3>", lambda event: context_menu.tk_popup(event.x_root, event.y_root))
-    # Bind Ctrl+V to paste screenshot
+    # Bindings
     root.bind("<Control-v>", lambda event: paste_screenshot())
+    root.bind("<slash>", lambda event: show_slash_menu())
 
 def new_note():
-    global current_note_id
+    global current_note_id, block_widgets
     current_note_id = f"note_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    text_area.delete("1.0", tk.END)
-    image_label.configure(image=None)
-    notes[current_note_id] = {"text": "", "image_path": None, "parent": None, "sub_notes": []}
+    notes[current_note_id] = {"blocks": [], "parent": None, "sub_notes": []}
+    clear_blocks()
+    add_text_block()
     update_content_area()
 
 def new_sub_note():
-    global current_note_id
+    global current_note_id, block_widgets
     if current_note_id:
         sub_note_id = f"subnote_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        notes[sub_note_id] = {"text": "", "image_path": None, "parent": current_note_id, "sub_notes": []}
+        notes[sub_note_id] = {"blocks": [], "parent": current_note_id, "sub_notes": []}
         notes[current_note_id]["sub_notes"].append(sub_note_id)
         current_note_id = sub_note_id
-        text_area.delete("1.0", tk.END)
-        image_label.configure(image=None)
+        clear_blocks()
+        add_text_block()
         update_content_area()
     else:
         messagebox.showwarning("Warning", "Create a parent note first!")
@@ -81,8 +70,13 @@ def new_sub_note():
 def save_note():
     global current_note_id
     if current_note_id:
-        text = text_area.get("1.0", tk.END)
-        notes[current_note_id]["text"] = text
+        notes[current_note_id]["blocks"] = []
+        for widget in block_widgets:
+            if isinstance(widget, tk.Text):
+                text = widget.get("1.0", tk.END).strip()
+                notes[current_note_id]["blocks"].append({"type": "text", "content": text})
+            elif isinstance(widget, ctk.CTkLabel) and widget.cget("image"):
+                notes[current_note_id]["blocks"].append({"type": "image", "path": notes[current_note_id].get("image_path")})
         
         with open("notes.json", "w") as f:
             json.dump(notes, f)
@@ -103,34 +97,49 @@ def show_modules():
     
     notes_listbox = ctk.CTkToplevel(root)
     notes_listbox.title("Modules")
-    notes_listbox.geometry("200x400")
+    notes_listbox.geometry("300x500")
     
-    listbox = tk.Listbox(notes_listbox, bg="#2b2b2b", fg="#ffffff")  # Dark theme for listbox
+    # Tabbed view for list and table
+    tabview = ctk.CTkTabview(notes_listbox)
+    tabview.pack(fill="both", expand=True, padx=5, pady=5)
+    
+    list_tab = tabview.add("List")
+    table_tab = tabview.add("Table")
+    
+    # List view
+    listbox = tk.Listbox(list_tab, bg="#f0f0f0", fg="#000000")
     listbox.pack(fill="both", expand=True, padx=5, pady=5)
-    
     for note_id in notes:
         if not notes[note_id]["parent"]:
             listbox.insert(tk.END, note_id)
-    
     listbox.bind('<<ListboxSelect>>', load_selected_note)
 
+    # Table view (simple)
+    table_frame = ctk.CTkFrame(table_tab)
+    table_frame.pack(fill="both", expand=True, padx=5, pady=5)
+    for i, note_id in enumerate([nid for nid in notes if not notes[nid]["parent"]]):
+        btn = ctk.CTkButton(table_frame, text=note_id[:15] + "...", command=lambda nid=note_id: switch_to_note(nid))
+        btn.grid(row=i, column=0, pady=2, sticky="ew")
+        count_label = ctk.CTkLabel(table_frame, text=f"{len(notes[note_id]['sub_notes'])} sub-notes")
+        count_label.grid(row=i, column=1, padx=5)
+
 def load_selected_note(event):
-    global current_note_id
+    global current_note_id, block_widgets
     widget = event.widget
     selection = widget.curselection()
     if selection:
         current_note_id = widget.get(selection[0])
-        note = notes[current_note_id]
-        
-        text_area.delete("1.0", tk.END)
-        text_area.insert("1.0", note["text"])
-        
-        if note["image_path"]:
-            img = Image.open(note["image_path"])
-            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-            image_label.configure(image=ctk_img)
-        else:
-            image_label.configure(image=None)
+        clear_blocks()
+        for block in notes[current_note_id]["blocks"]:
+            if block["type"] == "text":
+                text_widget = add_text_block()
+                text_widget.insert("1.0", block["content"])
+            elif block["type"] == "image" and block.get("path"):
+                img = Image.open(block["path"])
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+                image_widget = ctk.CTkLabel(content_frame, image=ctk_img, text="")
+                image_widget.pack(fill="x", pady=2)
+                block_widgets.append(image_widget)
         update_content_area()
 
 def paste_screenshot():
@@ -143,7 +152,9 @@ def paste_screenshot():
             img.save(save_path)
             
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-            image_label.configure(image=ctk_img)
+            image_widget = ctk.CTkLabel(content_frame, image=ctk_img, text="")
+            image_widget.pack(fill="x", pady=2)
+            block_widgets.append(image_widget)
             
             notes[current_note_id]["image_path"] = save_path
         else:
@@ -153,11 +164,11 @@ def paste_screenshot():
 
 def update_content_area():
     for widget in content_frame.winfo_children():
-        if widget != image_label and widget != text_area:
+        if widget not in block_widgets:
             widget.destroy()
     
     if current_note_id and notes[current_note_id]["parent"]:
-        breadcrumb_frame = ctk.CTkFrame(content_frame)
+        breadcrumb_frame = ctk.CTkFrame(content_frame, fg_color="#f0f0f0")
         breadcrumb_frame.pack(fill="x", pady=5)
         
         path = []
@@ -168,66 +179,118 @@ def update_content_area():
         
         for i, note_id in enumerate(path):
             btn = ctk.CTkButton(breadcrumb_frame, text=note_id[:10] + "...", 
-                              command=lambda nid=note_id: switch_to_note(nid))
+                              command=lambda nid=note_id: switch_to_note(nid),
+                              fg_color="#e0e0e0", text_color="#000000")
             btn.pack(side="left", padx=2)
 
 def switch_to_note(note_id):
-    global current_note_id
+    global current_note_id, block_widgets
     current_note_id = note_id
-    note = notes[current_note_id]
-    
-    text_area.delete("1.0", tk.END)
-    text_area.insert("1.0", note["text"])
-    
-    if note["image_path"]:
-        img = Image.open(note["image_path"])
-        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-        image_label.configure(image=ctk_img)
-    else:
-        image_label.configure(image=None)
+    clear_blocks()
+    for block in notes[current_note_id]["blocks"]:
+        if block["type"] == "text":
+            text_widget = add_text_block()
+            text_widget.insert("1.0", block["content"])
+        elif block["type"] == "image" and block.get("path"):
+            img = Image.open(block["path"])
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            image_widget = ctk.CTkLabel(content_frame, image=ctk_img, text="")
+            image_widget.pack(fill="x", pady=2)
+            block_widgets.append(image_widget)
     update_content_area()
 
-def toggle_bold():
-    current_font = text_area.cget("font")
-    if isinstance(current_font, tuple) and len(current_font) >= 2:
-        family = current_font[0]
-        size = current_font[1]
-        weight = current_font[2] if len(current_font) > 2 else "normal"
-    else:
-        family, size, weight = "Arial", 12, "normal"
+def add_text_block():
+    global block_widgets
+    text_widget = tk.Text(content_frame, height=2, wrap="word", bg="#ffffff", fg="#000000", font=("Arial", 12))
+    text_widget.pack(fill="x", pady=2)
+    block_widgets.append(text_widget)
     
-    new_weight = "bold" if weight != "bold" else "normal"
-    text_area.configure(font=(family, int(size), new_weight))
+    # Context menu for formatting
+    context_menu = tk.Menu(text_widget, tearoff=0)
+    context_menu.add_command(label="Bold", command=lambda: toggle_bold(text_widget))
+    context_menu.add_command(label="Italic", command=lambda: toggle_italic(text_widget))
+    context_menu.add_command(label="Underline", command=lambda: toggle_underline(text_widget))
+    context_menu.add_command(label="Change Color", command=lambda: choose_color(text_widget))
+    context_menu.add_command(label="Change Font", command=lambda: show_font_menu(text_widget))
+    text_widget.bind("<Button-3>", lambda event: context_menu.tk_popup(event.x_root, event.y_root))
+    return text_widget
 
-def toggle_underline():
-    messagebox.showinfo("Info", "Underline not supported in current version")
+def clear_blocks():
+    global block_widgets
+    for widget in block_widgets:
+        widget.destroy()
+    block_widgets = []
 
-def choose_color():
-    color = colorchooser.askcolor(title="Choose Color")[1]
-    if color:
-        text_area.configure(text_color=color)
+def toggle_bold(text_widget):
+    try:
+        current_tags = text_widget.tag_names(tk.SEL_FIRST)
+        if "bold" in current_tags:
+            text_widget.tag_remove("bold", tk.SEL_FIRST, tk.SEL_LAST)
+        else:
+            text_widget.tag_add("bold", tk.SEL_FIRST, tk.SEL_LAST)
+            text_widget.tag_configure("bold", font=("", 12, "bold"))
+    except tk.TclError:
+        pass
 
-def show_font_menu():
+def toggle_italic(text_widget):
+    try:
+        current_tags = text_widget.tag_names(tk.SEL_FIRST)
+        if "italic" in current_tags:
+            text_widget.tag_remove("italic", tk.SEL_FIRST, tk.SEL_LAST)
+        else:
+            text_widget.tag_add("italic", tk.SEL_FIRST, tk.SEL_LAST)
+            text_widget.tag_configure("italic", font=("", 12, "italic"))
+    except tk.TclError:
+        pass
+
+def toggle_underline(text_widget):
+    try:
+        current_tags = text_widget.tag_names(tk.SEL_FIRST)
+        if "underline" in current_tags:
+            text_widget.tag_remove("underline", tk.SEL_FIRST, tk.SEL_LAST)
+        else:
+            text_widget.tag_add("underline", tk.SEL_FIRST, tk.SEL_LAST)
+            text_widget.tag_configure("underline", underline=True)
+    except tk.TclError:
+        pass
+
+def choose_color(text_widget):
+    try:
+        color = colorchooser.askcolor(title="Choose Color")[1]
+        if color:
+            text_widget.tag_add("color", tk.SEL_FIRST, tk.SEL_LAST)
+            text_widget.tag_configure("color", foreground=color)
+    except tk.TclError:
+        pass
+
+def show_font_menu(text_widget):
     font_menu = ctk.CTkToplevel(root)
     font_menu.title("Select Font")
     font_menu.geometry("200x150")
     
     for font in ["Arial", "Times New Roman", "Calibri"]:
         ctk.CTkButton(font_menu, text=font, 
-                     command=lambda f=font: [change_font(f), font_menu.destroy()]).pack(pady=5)
+                     command=lambda f=font: [change_font(text_widget, f), font_menu.destroy()]).pack(pady=5)
 
-def change_font(font):
-    current_font = text_area.cget("font")
-    if isinstance(current_font, tuple) and len(current_font) >= 2:
-        size = current_font[1]
-        weight = current_font[2] if len(current_font) > 2 else "normal"
-    else:
-        size, weight = 12, "normal"
-    text_area.configure(font=(font, int(size), weight))
+def change_font(text_widget, font):
+    try:
+        text_widget.tag_add("font", tk.SEL_FIRST, tk.SEL_LAST)
+        text_widget.tag_configure("font", font=(font, 12))
+    except tk.TclError:
+        pass
+
+def show_slash_menu():
+    slash_menu = ctk.CTkToplevel(root)
+    slash_menu.title("Commands")
+    slash_menu.geometry("200x150")
+    slash_menu.attributes("-topmost", True)
+    
+    ctk.CTkButton(slash_menu, text="Add Text Block", command=lambda: [add_text_block(), slash_menu.destroy()]).pack(pady=5)
+    ctk.CTkButton(slash_menu, text="Paste Image", command=lambda: [paste_screenshot(), slash_menu.destroy()]).pack(pady=5)
 
 def main():
-    ctk.set_appearance_mode("dark")  # Set to dark mode
-    ctk.set_default_color_theme("dark-blue")  # Use a dark theme
+    ctk.set_appearance_mode("light")  # Light mode
+    ctk.set_default_color_theme("blue")  # Light blue accents
     
     create_widgets()
     load_notes()
